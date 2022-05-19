@@ -1,7 +1,6 @@
 #include "../libft/libft.h"
-#include <fcntl.h>
-#include <sys/wait.h>
 #include <stdio.h>
+#include <fcntl.h>
 
 char	**fill_paths(char **envp)
 {
@@ -24,105 +23,103 @@ char	**fill_paths(char **envp)
 	return (NULL);
 }
 
-void	update_paths(char *arg, char **paths)
+char	*get_abs_cmd(char **paths, char *cmd)
 {
-	int	i;
+	char	*tmp;
+	char	*abs_cmd;
+	int		i;
 
+	if (!access(cmd, X_OK))
+		return (ft_strdup(cmd));
 	i = 0;
 	while (paths[i])
 	{
-		char	*tmp;
 		tmp = ft_strjoin(paths[i], "/");
-		free(paths[i]);
-		paths[i] = tmp;
-		tmp = ft_strjoin(paths[i], arg);
-		free(paths[i]);
-		paths[i] = tmp;
-		i++;
-	}	
-}
-
-char	*get_real_path(char **paths)
-{
-	int	i;
-
-	i = 0;
-	while (paths[i])
-	{
-		if (!access(paths[i], X_OK))
-			return (ft_strdup(paths[i]));
-		i++;
-	}	
-	return (NULL);
-}
-
-void	print_paths(char **paths)
-{
-	int	i;
-	
-	i = 0;
-	while (paths[i])
-	{
-		printf("%s\n", paths[i]);
+		abs_cmd = ft_strjoin(tmp, cmd);
+		free(tmp);
+		if (!access(abs_cmd, X_OK))
+			return (abs_cmd);
+		free(abs_cmd);
 		i++;
 	}
+	return (NULL);
 }
 
 int	main(int argc, char **argv, char **envp)
 {
-	pid_t	p1;
-	pid_t	p2;
-	int	infile;
-	int	outfile;
-	int	fd[2];
-	char	**args;
 	char	**paths;
-	char	*true_path;
+	int		infile;
+	int		outfile;
+	int		fd[2];
+	pid_t	child_1;
+	pid_t	child_2;
 
 	if (argc != 5)
 		return (1);
+
 	infile = open(argv[1], O_RDONLY);
-	outfile = open(argv[4], O_WRONLY, O_CREAT | O_CREAT, 0644);
-	pipe(fd);
-	p1 = fork();
-	if (p1 == 0)
+	if (infile == -1)
 	{
-		dup2(fd[1], STDOUT);
+		perror(argv[1]);
+		return (1);
+	}
+	outfile = open(argv[argc - 1], O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	if (infile == -1)
+	{
+		perror(argv[argc - 1]);
+		return (1);
+	}
+	
+	paths = fill_paths(envp);
+	if (!paths)
+	{
+		printf("Env error\n");
+		printf("No such file of direcroty\n");
+		exit(1);
+	}
+
+	pipe(fd);
+	child_1 = fork();
+	if (child_1 == 0)
+	{
 		dup2(infile, STDIN);
-		paths = fill_paths(envp);
-		update_paths(argv[2], paths);
-		args = ft_split(argv[2], ' ');
-		true_path = get_real_path(paths);
+		dup2(fd[1], STDOUT);
 		close(fd[0]);
 		close(fd[1]);
 		close(infile);
-		execve(true_path, args, envp);
-		free(true_path);
-		ft_split_free(paths);
-		ft_split_free(args);
+		close(outfile);
+		char **cmd_args = ft_split(argv[2], ' ');
+		char *full_path = get_abs_cmd(paths, cmd_args[0]);
+		if (!full_path)
+			printf("command not found : %s\n", cmd_args[0]);
+		execve(full_path, cmd_args, envp);
 	}
-	p2 = fork();
-	if (p2 == 0)
+	child_2 = fork();
+	if (child_2 == 0)
 	{
-		dup2(fd[0], STDIN);
 		dup2(outfile, STDOUT);
-		paths = fill_paths(envp);
-		update_paths(argv[3], paths);
-		args = ft_split(argv[3], ' ');
-		true_path = get_real_path(paths);
+		dup2(fd[0], STDIN);
 		close(fd[0]);
 		close(fd[1]);
+		close(infile);
 		close(outfile);
-		execve(true_path, args, envp);
-		free(true_path);
-		ft_split_free(paths);
-		ft_split_free(args);
+		char **cmd_args = ft_split(argv[3], ' ');
+		char *full_path = get_abs_cmd(paths, cmd_args[0]);
+		if (!full_path)
+			printf("command not found : %s\n", cmd_args[0]);
+		execve(full_path, cmd_args, envp);
 	}
+
 	close(fd[0]);
 	close(fd[1]);
+
+	waitpid(child_1, NULL, 0);
+	waitpid(child_2, NULL, 0);
+
 	close(infile);
 	close(outfile);
-	waitpid(p1, NULL, 0);
-	waitpid(p2, NULL, 0);
+
+	// free(full_path);
+	ft_split_free(paths);
 	return (0);
 }
